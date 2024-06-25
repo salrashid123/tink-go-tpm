@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "github.com/salrashid123/tink-go-tpm/v2/proto";
+
+message TPMKey {
+  uint32 version = 1;  
+  KeyType keyType = 2;
+  enum KeyType {
+    SYMMETRIC = 0;
+    HMAC = 1;
+  }
+  oneof Key {
+    HMACKey hmacKey = 3;
+  }
+}
+
+
+// key_type: type.googleapis.com/google.crypto.tink.TPMHmacKey
+message HMACKey {
+  bytes name = 1;
+  bytes public = 2;
+  bytes private = 3;  
+  bytes policy_digest = 4;  
+  HMACKeyFormat key_format = 5;
+}
+
+message HMACParams {
+  HashType hash = 1;  // HashType is an enum.
+  uint32 tag_size = 2;
+}
+
+enum HashType {
+  UNKNOWN_HASH = 0;
+  SHA1 = 1;  // Using SHA1 for digital signature is deprecated but HMAC-SHA1 is
+             // fine.
+  SHA384 = 2;
+  SHA256 = 3;
+  SHA512 = 4;
+  SHA224 = 5;
+}
+
+message HMACKeyFormat {
+  HMACParams params = 1;
+  uint32 key_size = 2;
+  uint32 version = 3;
+}
