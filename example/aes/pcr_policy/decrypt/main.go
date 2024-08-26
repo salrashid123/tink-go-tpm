@@ -2,23 +2,25 @@ package main
 
 import (
 	"bytes"
-	"encoding/hex"
 	"flag"
 	"io"
 	"log"
 	"net"
 	"os"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/google/go-tpm-tools/simulator"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
-	tinktpm "github.com/salrashid123/tink-go-tpm/v2"
+	tpmaead "github.com/salrashid123/tink-go-tpm/v2/aead"
 	tinkcommon "github.com/salrashid123/tink-go-tpm/v2/common"
+	"github.com/tink-crypto/tink-go/v2/aead"
+
 	"github.com/tink-crypto/tink-go/v2/core/registry"
 	"github.com/tink-crypto/tink-go/v2/insecurecleartextkeyset"
-	"github.com/tink-crypto/tink-go/v2/mac"
 
 	"github.com/tink-crypto/tink-go/v2/keyset"
 )
@@ -26,12 +28,10 @@ import (
 const ()
 
 var (
-	tpmPath   = flag.String("tpm-path", "/dev/tpmrm0", "Path to the TPM device (character device or a Unix socket).")
-	plaintext = flag.String("plaintext", "foo", "plaintext to mac")
-	sensitive = flag.String("sensitive", "change this password to a secret", "specify an hmac key")
-
-	macFile = flag.String("macFile", "mac.dat", "File to write the mac to")
-	keySet  = flag.String("keySet", "keyset.json", "File to write the keyset to")
+	tpmPath       = flag.String("tpm-path", "127.0.0.1:2321", "Path to the TPM device (character device or a Unix socket).")
+	encryptedFile = flag.String("encryptedFile", "encrypted.dat", "File to read the encrypted data from")
+	pcrList       = flag.String("pcrList", "", "SHA256 PCR Values to seal against 16,23")
+	keySet        = flag.String("keySet", "keyset.json", "File to read the keyset from")
 )
 
 var TPMDEVICES = []string{"/dev/tpm0", "/dev/tpmrm0"}
@@ -61,6 +61,25 @@ func run() int {
 
 	rwr := transport.FromReadWriter(rwc)
 
+	var pcrs []uint
+	pcrsStr := strings.Split(*pcrList, ",")
+	for _, v := range pcrsStr {
+		uv, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			log.Fatalf("can't open TPM %q: %v", *tpmPath, err)
+		}
+		pcrs = append(pcrs, uint(uv))
+	}
+
+	sel := tpm2.TPMLPCRSelection{
+		PCRSelections: []tpm2.TPMSPCRSelection{
+			{
+				Hash:      tpm2.TPMAlgSHA256,
+				PCRSelect: tpm2.PCClientCompatible.PCRs(pcrs...),
+			},
+		},
+	}
+
 	sess, cleanup1, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, tpm2.Trial())
 	if err != nil {
 		log.Println(err)
@@ -69,8 +88,9 @@ func run() int {
 
 	defer cleanup1()
 
-	pav := tpm2.PolicyAuthValue{
+	pav := tpm2.PolicyPCR{
 		PolicySession: sess.Handle(),
+		Pcrs:          sel,
 	}
 	_, err = pav.Execute(rwr)
 	if err != nil {
@@ -86,60 +106,52 @@ func run() int {
 		return 1
 	}
 
-	se, err := tinkcommon.NewPasswordSession(rwr, nil, pgd.PolicyDigest.Buffer, []byte(*sensitive))
+	se, err := tinkcommon.NewPCRSession(rwr, nil, nil, pgd.PolicyDigest.Buffer, sel.PCRSelections, nil)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	hmacKeyManager := tinktpm.NewTPMHMACKeyManager(rwc, se)
-	err = registry.RegisterKeyManager(hmacKeyManager)
+	aesKeyManager := tpmaead.NewTpmAesHmacAeadKeyManager(rwc, se)
+
+	err = registry.RegisterKeyManager(aesKeyManager)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	kh1, err := keyset.NewHandle(tinktpm.HMACSHA256Tag256KeyTPMNoPrefixTemplate())
-
+	mf, err := os.ReadFile(*encryptedFile)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	a, err := mac.New(kh1)
+	ksf, err := os.ReadFile(*keySet)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	tag, err := a.ComputeMAC([]byte(*plaintext))
-	if err != nil {
-		log.Println(err)
-		return 1
-	}
-	log.Printf("    MAC %s\n", hex.EncodeToString(tag))
+	ksr := keyset.NewJSONReader(bytes.NewBuffer(ksf))
 
-	buf := new(bytes.Buffer)
-	w := keyset.NewJSONWriter(buf)
-
-	err = insecurecleartextkeyset.Write(kh1, w)
+	kh, err := insecurecleartextkeyset.Read(ksr)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	err = os.WriteFile(*macFile, tag, 0644)
+	av, err := aead.New(kh)
+	if err != nil {
+		log.Println(err)
+		return 1
+	}
+	d, err := av.Decrypt(mf, nil)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	err = os.WriteFile(*keySet, buf.Bytes(), 0644)
-	if err != nil {
-		log.Println(err)
-		return 1
-	}
-
+	log.Printf("decrypted %s\n", string(d))
 	return 0
 }
 

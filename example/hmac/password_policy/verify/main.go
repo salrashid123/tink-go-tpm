@@ -13,8 +13,8 @@ import (
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
-	tinktpm "github.com/salrashid123/tink-go-tpm/v2"
 	tinkcommon "github.com/salrashid123/tink-go-tpm/v2/common"
+	tpmmac "github.com/salrashid123/tink-go-tpm/v2/mac"
 	"github.com/tink-crypto/tink-go/v2/core/registry"
 	"github.com/tink-crypto/tink-go/v2/insecurecleartextkeyset"
 	"github.com/tink-crypto/tink-go/v2/mac"
@@ -22,17 +22,15 @@ import (
 	"github.com/tink-crypto/tink-go/v2/keyset"
 )
 
-const (
-	emptyPassword   = ""
-	defaultPassword = ""
-)
+const ()
 
 var (
-	tpmPath   = flag.String("tpm-path", "/dev/tpmrm0", "Path to the TPM device (character device or a Unix socket).")
-	plaintext = flag.String("plaintext", "foo", "plaintext to mac")
-	password  = flag.String("password", "testpswd", "password value")
-	macFile   = flag.String("macFile", "mac.dat", "File to write the mac to")
-	keySet    = flag.String("keySet", "keyset.json", "File to write the keyset to")
+	tpmPath       = flag.String("tpm-path", "/dev/tpmrm0", "Path to the TPM device (character device or a Unix socket).")
+	plaintext     = flag.String("plaintext", "foo", "plaintext to mac")
+	password      = flag.String("password", "testpswd", "password value")
+	ownerpassword = flag.String("ownerpassword", "", "TPMOwner password")
+	macFile       = flag.String("macFile", "mac.dat", "File to write the mac to")
+	keySet        = flag.String("keySet", "keyset.json", "File to write the keyset to")
 )
 
 var TPMDEVICES = []string{"/dev/tpm0", "/dev/tpmrm0"}
@@ -89,13 +87,13 @@ func run() int {
 
 	pswd := []byte(*password)
 
-	se, err := tinkcommon.NewPasswordSession(rwr, pswd, pgd.PolicyDigest.Buffer, nil)
+	se, err := tinkcommon.NewPasswordSession(rwr, pswd, []byte(*ownerpassword), pgd.PolicyDigest.Buffer)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	hmacKeyManager := tinktpm.NewTPMHMACKeyManager(rwc, se)
+	hmacKeyManager := tpmmac.NewTPMHMACKeyManager(rwc, se)
 
 	err = registry.RegisterKeyManager(hmacKeyManager)
 	if err != nil {

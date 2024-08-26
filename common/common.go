@@ -1,96 +1,31 @@
 package common
 
 import (
+	"io"
+	"net"
+	"slices"
+
+	"github.com/google/go-tpm-tools/simulator"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
+	"github.com/google/go-tpm/tpmutil"
 )
 
-var (
-	ECCSRKH2Template = tpm2.TPMTPublic{
-		Type:    tpm2.TPMAlgECC,
-		NameAlg: tpm2.TPMAlgSHA256,
-		ObjectAttributes: tpm2.TPMAObject{
-			FixedTPM:            true,
-			FixedParent:         true,
-			SensitiveDataOrigin: true,
-			UserWithAuth:        true,
-			NoDA:                true,
-			Restricted:          true,
-			Decrypt:             true,
-		},
-		Parameters: tpm2.NewTPMUPublicParms(
-			tpm2.TPMAlgECC,
-			&tpm2.TPMSECCParms{
-				Symmetric: tpm2.TPMTSymDefObject{
-					Algorithm: tpm2.TPMAlgAES,
-					KeyBits: tpm2.NewTPMUSymKeyBits(
-						tpm2.TPMAlgAES,
-						tpm2.TPMKeyBits(128),
-					),
-					Mode: tpm2.NewTPMUSymMode(
-						tpm2.TPMAlgAES,
-						tpm2.TPMAlgCFB,
-					),
-				},
-				CurveID: tpm2.TPMECCNistP256,
-			},
-		),
-		Unique: tpm2.NewTPMUPublicID(
-			tpm2.TPMAlgECC,
-			&tpm2.TPMSECCPoint{
-				X: tpm2.TPM2BECCParameter{
-					Buffer: make([]byte, 0),
-				},
-				Y: tpm2.TPM2BECCParameter{
-					Buffer: make([]byte, 0),
-				},
-			},
-		),
-	}
-)
+var TPMDEVICES = []string{"/dev/tpm0", "/dev/tpmrm0"}
 
-func pcrPolicyDigest(thetpm transport.TPM, pcr []uint) ([]byte, error) {
-	sess, cleanup, err := tpm2.PolicySession(thetpm, tpm2.TPMAlgSHA256, 16, tpm2.Trial())
-	if err != nil {
-		return nil, err
+func OpenTPM(path string) (io.ReadWriteCloser, error) {
+	if slices.Contains(TPMDEVICES, path) {
+		return tpmutil.OpenTPM(path)
+	} else if path == "simulator" {
+		return simulator.GetWithFixedSeedInsecure(1073741825)
+	} else {
+		return net.Dial("tcp", path)
 	}
-	defer cleanup()
-
-	selection := tpm2.TPMLPCRSelection{
-		PCRSelections: []tpm2.TPMSPCRSelection{
-			{
-				Hash:      tpm2.TPMAlgSHA256,
-				PCRSelect: tpm2.PCClientCompatible.PCRs(pcr...),
-			},
-		},
-	}
-	expectedDigest, err := getExpectedPCRDigest(thetpm, selection, tpm2.TPMAlgSHA256)
-	if err != nil {
-		return nil, err
-	}
-	_, err = tpm2.PolicyPCR{
-		PolicySession: sess.Handle(),
-		Pcrs:          selection,
-		PcrDigest: tpm2.TPM2BDigest{
-			Buffer: expectedDigest,
-		},
-	}.Execute(thetpm)
-	if err != nil {
-		return nil, err
-	}
-
-	pgd, err := tpm2.PolicyGetDigest{
-		PolicySession: sess.Handle(),
-	}.Execute(thetpm)
-	if err != nil {
-		return nil, err
-	}
-	_, err = tpm2.FlushContext{FlushHandle: sess.Handle()}.Execute(thetpm)
-	if err != nil {
-		return nil, err
-	}
-	return pgd.PolicyDigest.Buffer, nil
 }
+
+const (
+	TPMKeyVersion = 0
+)
 
 func getExpectedPCRDigest(thetpm transport.TPM, selection tpm2.TPMLPCRSelection, hashAlg tpm2.TPMAlgID) ([]byte, error) {
 	pcrRead := tpm2.PCRRead{
@@ -120,21 +55,22 @@ func getExpectedPCRDigest(thetpm transport.TPM, selection tpm2.TPMLPCRSelection,
 type AuthCallback interface {
 	GetSession() (auth tpm2.Session, closer func() error, err error) // this supplies the session handle to the library
 	GetPassword() []byte
+	GetOwnerPassword() []byte
 	GetPolicyDigest() []byte
-	GetSensitive() []byte
 }
 
 // for pcr sessions
 type PCRCallback struct {
-	rwr          transport.TPM
-	sel          []tpm2.TPMSPCRSelection
-	password     []byte
-	policydigest []byte
-	sensitive    []byte
+	rwr           transport.TPM
+	sel           []tpm2.TPMSPCRSelection
+	password      []byte
+	ownerpassword []byte
+	policydigest  []byte
+	pcrdigest     []byte
 }
 
-func NewPCRSession(rwr transport.TPM, password []byte, policyDigest []byte, sensitive []byte, sel []tpm2.TPMSPCRSelection) (PCRCallback, error) {
-	return PCRCallback{rwr, sel, password, policyDigest, sensitive}, nil
+func NewPCRSession(rwr transport.TPM, password []byte, ownerpassword []byte, policyDigest []byte, sel []tpm2.TPMSPCRSelection, pcrDigest []byte) (PCRCallback, error) {
+	return PCRCallback{rwr, sel, password, ownerpassword, policyDigest, pcrDigest}, nil
 }
 
 func (p PCRCallback) GetSession() (auth tpm2.Session, closer func() error, err error) {
@@ -144,6 +80,9 @@ func (p PCRCallback) GetSession() (auth tpm2.Session, closer func() error, err e
 	}
 	_, err = tpm2.PolicyPCR{
 		PolicySession: sess.Handle(),
+		// PcrDigest: tpm2.TPM2BDigest{
+		// 	Buffer: p.pcrdigest,
+		// },
 		Pcrs: tpm2.TPMLPCRSelection{
 			PCRSelections: p.sel,
 		},
@@ -158,24 +97,28 @@ func (p PCRCallback) GetPassword() []byte {
 	return p.password
 }
 
+func (p PCRCallback) GetOwnerPassword() []byte {
+	return p.ownerpassword
+}
+
 func (p PCRCallback) GetPolicyDigest() []byte {
 	return p.policydigest
 }
 
-func (p PCRCallback) GetSensitive() []byte {
-	return p.sensitive
+func (p PCRCallback) GetPCRDigest() []byte {
+	return p.pcrdigest
 }
 
 // for password sessions
 type PasswordCallback struct {
-	rwr          transport.TPM
-	password     []byte
-	policydigest []byte
-	sensitive    []byte
+	rwr           transport.TPM
+	password      []byte
+	ownerpassword []byte
+	policydigest  []byte
 }
 
-func NewPasswordSession(rwr transport.TPM, password []byte, policyDigest []byte, sensitive []byte) (PasswordCallback, error) {
-	return PasswordCallback{rwr, password, policyDigest, sensitive}, nil
+func NewPasswordSession(rwr transport.TPM, password []byte, ownerpassword []byte, policyDigest []byte) (PasswordCallback, error) {
+	return PasswordCallback{rwr, password, ownerpassword, policyDigest}, nil
 }
 
 func (p PasswordCallback) GetSession() (auth tpm2.Session, closer func() error, err error) {
@@ -187,10 +130,10 @@ func (p PasswordCallback) GetPassword() []byte {
 	return p.password
 }
 
-func (p PasswordCallback) GetPolicyDigest() []byte {
-	return p.policydigest
+func (p PasswordCallback) GetOwnerPassword() []byte {
+	return p.ownerpassword
 }
 
-func (p PasswordCallback) GetSensitive() []byte {
-	return p.sensitive
+func (p PasswordCallback) GetPolicyDigest() []byte {
+	return p.policydigest
 }

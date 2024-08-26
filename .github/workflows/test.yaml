@@ -1,0 +1,74 @@
+name: Go Test
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**/README.md'
+  pull_request:
+    branches:
+      - main
+
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Run TestMac
+        run: go test -v ./mac -run ^TestMac$
+
+      - name: Run TestMacFail
+        run: go test -v ./mac -run ^TestMacFail$
+
+      - name: Run TestMacPassword
+        run: go test -v ./mac -run ^TestMacPassword$
+
+      - name: Run TestMacPasswordFail
+        run: go test -v ./mac -run ^TestMacPasswordFail$
+
+      - name: Run TestMacPCR
+        run: go test -v ./mac -run ^TestMacPCR$
+
+      - name: Run TestMacPCRFail
+        run: go test -v ./mac -run ^TestMacPCRFail$
+
+      - name: Run TestMacOwnerPassword
+        run: go test -v ./mac -run ^TestMacOwnerPassword$
+
+      - name: Run TestMacOwnerPasswordFail
+        run: go test -v ./mac -run ^TestMacOwnerPasswordFail$
+
+      - name: Run TestAead
+        run: go test -v ./aead -run ^TestAead$
+
+      - name: Run TestAeadFail
+        run: go test -v ./aead -run ^TestAeadFail$
+
+      - name: Run TestAead
+        run: go test -v ./aead -run ^TestAead$
+
+      - name: Run TestAeadPassword
+        run: go test -v ./aead -run ^TestAeadPassword$
+
+      - name: Run TestAeadPasswordFail
+        run: go test -v ./aead -run ^TestAeadPasswordFail$
+
+      - name: Run TestAeadPCR
+        run: go test -v ./aead -run ^TestAeadPCR$
+
+      - name: Run TestAeadPCRFail
+        run: go test -v ./aead -run ^TestAeadPCRFail$
+
+      - name: Run TestAeadOwnerPassword
+        run: go test -v ./aead -run ^TestAeadOwnerPassword$
+
+      - name: Run TestAeadOwnerPasswordFail
+        run: go test -v ./aead -run ^TestAeadOwnerPasswordFail$

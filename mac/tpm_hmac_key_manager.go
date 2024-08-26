@@ -1,39 +1,29 @@
-package tinktpm
+package mac
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 
+	keyfile "github.com/foxboron/go-tpm-keyfiles"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
+	"github.com/salrashid123/tink-go-tpm/v2/common"
 	tpmsubtle "github.com/salrashid123/tink-go-tpm/v2/mac/subtle"
 	"github.com/tink-crypto/tink-go/v2/core/registry"
 	"github.com/tink-crypto/tink-go/v2/keyset"
 	"github.com/tink-crypto/tink-go/v2/mac/subtle"
 
-	tinkcommon "github.com/salrashid123/tink-go-tpm/v2/common"
 	tinktpmprotopb "github.com/salrashid123/tink-go-tpm/v2/proto"
 	tinkpb "github.com/tink-crypto/tink-go/v2/proto/tink_go_proto"
 	"google.golang.org/protobuf/proto"
 )
 
-/*
-To compile the proto:
-
-go get -u github.com/golang/protobuf/protoc-gen-go
-
-# to compile the protobuf with libprotoc 25.1
-/usr/local/bin/protoc -I ./ --include_imports \
-   --experimental_allow_proto3_optional --include_source_info \
-   --descriptor_set_out=proto/tinktpm.proto.pb --go_out=paths=source_relative:. proto/tinktpm.proto
-*/
-
 const (
-	hmacKeyVersion = 0
-	//hmacTypeURL    = "type.googleapis.com/google.crypto.tink.TPMHmacKey"
-	hmacTypeURL = "type.googleapis.com/github.salrashid123.tink-go-tpm.TPMHmacKey"
+	HMACKeyVersion = 0
+	hmacTypeURL    = "type.googleapis.com/github.salrashid123.tink-go-tpm.HmacTpmKey"
 )
 
 var _ registry.KeyManager = (*TPMHMACKeyManager)(nil)
@@ -50,26 +40,34 @@ func HMACSHA256Tag256KeyTPMNoPrefixTemplate() *tinkpb.KeyTemplate {
 }
 
 func HMACSHA512Tag256KeyTPMTemplate() *tinkpb.KeyTemplate {
-	return createHMACTPMKeyTemplate(64, 32, tinktpmprotopb.HashType_SHA512, tinkpb.OutputPrefixType_TINK)
+	return createHMACTPMKeyTemplate(64, 64, tinktpmprotopb.HashType_SHA512, tinkpb.OutputPrefixType_TINK)
 }
 
 func HMACSHA512Tag256KeyTPMNoPrefixTemplate() *tinkpb.KeyTemplate {
-	return createHMACTPMKeyTemplate(64, 32, tinktpmprotopb.HashType_SHA512, tinkpb.OutputPrefixType_TINK)
+	return createHMACTPMKeyTemplate(64, 64, tinktpmprotopb.HashType_SHA512, tinkpb.OutputPrefixType_TINK)
 }
 
 // createHMACKeyTemplate creates a new KeyTemplate for HMAC using the given parameters.
-func createHMACTPMKeyTemplate(keySize, tagSize uint32, hashType tinktpmprotopb.HashType, opt tinkpb.OutputPrefixType) *tinkpb.KeyTemplate {
+func createHMACTPMKeyTemplate(keySize uint32, tagSize uint32, hashType tinktpmprotopb.HashType, opt tinkpb.OutputPrefixType) *tinkpb.KeyTemplate {
+
+	//  see 27.7.5.1 of https://trustedcomputinggroup.org/wp-content/uploads/TPM-Rev-2.0-Part-1-Architecture-01.38.pdf
+	// "M. For a TPM_ALG_KEYEDHASH object, the size is the digest size of the nameAlg of the object.""
+	//
+	//  sha256 digest size  32bytes;   sha512 digest size 64bytes
+	//  note, dont' need to specify the keysize here to the tpm since its automatically sized.  The only reason i have
+	//  an hmac keysize here is to get past tinks validation.
 	params := tinktpmprotopb.HMACParams{
 		Hash:    hashType,
 		TagSize: tagSize,
 	}
-	format := tinktpmprotopb.HMACKeyFormat{
+	format := tinktpmprotopb.HMACTpmKeyFormat{
 		Params:  &params,
 		KeySize: keySize,
 	}
 	serializedFormat, err := proto.Marshal(&format)
 	if err != nil {
-		fmt.Errorf("failed to marshal key format: %s", err)
+		fmt.Printf("failed to marshal key format: %s", err)
+		return nil
 	}
 
 	return &tinkpb.KeyTemplate{
@@ -82,14 +80,18 @@ func createHMACTPMKeyTemplate(keySize, tagSize uint32, hashType tinktpmprotopb.H
 // hmacKeyManager generates new HMAC keys and produces new instances of HMAC.
 type TPMHMACKeyManager struct {
 	TpmDevice    io.ReadWriteCloser // TPM read closer
-	AuthCallback tinkcommon.AuthCallback
+	AuthCallback common.AuthCallback
 }
 
-func NewTPMHMACKeyManager(rwr io.ReadWriteCloser, ac tinkcommon.AuthCallback) *TPMHMACKeyManager {
+func NewTPMHMACKeyManager(rwr io.ReadWriteCloser, ac common.AuthCallback) *TPMHMACKeyManager {
 	return &TPMHMACKeyManager{
 		TpmDevice:    rwr,
 		AuthCallback: ac,
 	}
+}
+
+func (km *TPMHMACKeyManager) UpdateAuthCallback(ac common.AuthCallback) {
+	km.AuthCallback = ac
 }
 
 // Primitive constructs a HMAC instance for the given serialized HMACKey.
@@ -102,14 +104,14 @@ func (km *TPMHMACKeyManager) Primitive(serializedKey []byte) (interface{}, error
 	if err := proto.Unmarshal(serializedKey, tkey); err != nil {
 		return nil, errInvalidHMACKey
 	}
-	key := tkey.GetHmacKey()
+	key := tkey.GetHmacTpmKey()
 	if err := km.validateKey(key); err != nil {
 		return nil, err
 	}
 
 	hmac, err := tpmsubtle.NewTPMMAC(context.Background(), &tpmsubtle.TpmMAC{
 		TPMDevice:   km.TpmDevice,
-		Key:         *tkey.GetHmacKey(),
+		Key:         *tkey.GetHmacTpmKey(),
 		AuthSession: km.AuthCallback,
 		KeyFormat:   *key.KeyFormat,
 	})
@@ -125,20 +127,24 @@ func (km *TPMHMACKeyManager) NewKey(serializedKeyFormat []byte) (proto.Message, 
 	if len(serializedKeyFormat) == 0 {
 		return nil, errInvalidHMACKeyFormat
 	}
-	keyFormat := new(tinktpmprotopb.HMACKeyFormat)
+	keyFormat := new(tinktpmprotopb.HMACTpmKeyFormat)
 	if err := proto.Unmarshal(serializedKeyFormat, keyFormat); err != nil {
 		return nil, errInvalidHMACKeyFormat
 	}
 	if err := km.validateKeyFormat(keyFormat); err != nil {
-		return nil, fmt.Errorf("hmac_key_manager: invalid key format: %s", err)
+		return nil, err
 	}
 
 	// specify its parent directly
 	rwr := transport.FromReadWriter(km.TpmDevice)
 
 	primaryKey, err := tpm2.CreatePrimary{
-		PrimaryHandle: tpm2.TPMRHEndorsement,
-		InPublic:      tpm2.New2B(tinkcommon.ECCSRKH2Template),
+		PrimaryHandle: tpm2.AuthHandle{
+			Handle: tpm2.TPMRHOwner,
+			Name:   tpm2.HandleName(tpm2.TPMRHOwner),
+			Auth:   tpm2.PasswordAuth(km.AuthCallback.GetOwnerPassword()),
+		},
+		InPublic: tpm2.New2B(keyfile.ECCSRK_H2_Template),
 	}.Execute(rwr)
 	if err != nil {
 		return nil, fmt.Errorf("hmac_key_manager: error creating primary: %s", err)
@@ -160,17 +166,13 @@ func (km *TPMHMACKeyManager) NewKey(serializedKeyFormat []byte) (proto.Message, 
 		tpmHash = tpm2.TPMAlgSHA256
 	}
 
-	sdo := true
-	if km.AuthCallback.GetSensitive() != nil {
-		sdo = false
-	}
 	hmacTemplate := tpm2.TPMTPublic{
 		Type:    tpm2.TPMAlgKeyedHash,
-		NameAlg: tpmHash,
+		NameAlg: tpm2.TPMAlgSHA256,
 		ObjectAttributes: tpm2.TPMAObject{
 			FixedTPM:            true,
 			FixedParent:         true,
-			SensitiveDataOrigin: sdo,
+			SensitiveDataOrigin: true,
 			UserWithAuth:        true,
 			SignEncrypt:         true,
 		},
@@ -201,14 +203,11 @@ func (km *TPMHMACKeyManager) NewKey(serializedKeyFormat []byte) (proto.Message, 
 				UserAuth: tpm2.TPM2BAuth{
 					Buffer: km.AuthCallback.GetPassword(),
 				},
-				Data: tpm2.NewTPMUSensitiveCreate(&tpm2.TPM2BSensitiveData{
-					Buffer: km.AuthCallback.GetSensitive(),
-				}),
 			},
 		},
 	}.Execute(rwr)
 	if err != nil {
-		return nil, fmt.Errorf("hmac_key_manager: error creating hmac key: %s", err)
+		return nil, err
 	}
 
 	defer func() {
@@ -218,21 +217,41 @@ func (km *TPMHMACKeyManager) NewKey(serializedKeyFormat []byte) (proto.Message, 
 		_, _ = flushContextCmd.Execute(rwr)
 	}()
 
+	hasEmptyAuth := true
+	if km.AuthCallback.GetPassword() != nil {
+		hasEmptyAuth = false
+	}
+	tkf := &keyfile.TPMKey{
+		Keytype:   keyfile.OIDLoadableKey,
+		Pubkey:    hmacKey.OutPublic,
+		Privkey:   hmacKey.OutPrivate,
+		EmptyAuth: hasEmptyAuth,
+		Parent:    tpm2.TPMRHOwner,
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	b := new(bytes.Buffer)
+	err = keyfile.Encode(b, tkf)
+	if err != nil {
+		return nil, err
+	}
+
 	return &tinktpmprotopb.TPMKey{
-		Version: hmacKeyVersion,
+		Version: common.TPMKeyVersion,
 		KeyType: tinktpmprotopb.TPMKey_HMAC,
-		Key: &tinktpmprotopb.TPMKey_HmacKey{
-			HmacKey: &tinktpmprotopb.HMACKey{
-				KeyFormat: &tinktpmprotopb.HMACKeyFormat{
-					Version: hmacKeyVersion,
+		Key: &tinktpmprotopb.TPMKey_HmacTpmKey{
+			HmacTpmKey: &tinktpmprotopb.HMACTpmKey{
+				Version: HMACKeyVersion,
+				KeyFormat: &tinktpmprotopb.HMACTpmKeyFormat{
 					KeySize: keyFormat.KeySize,
 					Params: &tinktpmprotopb.HMACParams{
 						Hash:    keyFormat.Params.Hash,
 						TagSize: keyFormat.Params.TagSize,
 					},
 				},
-				Private:      hmacKey.OutPrivate.Buffer,
-				Public:       hmacKey.OutPublic.Bytes(),
+				Keyfile:      b.Bytes(),
 				PolicyDigest: km.AuthCallback.GetPolicyDigest(),
 			},
 		},
@@ -273,40 +292,19 @@ func (km *TPMHMACKeyManager) KeyMaterialType() tinkpb.KeyData_KeyMaterialType {
 	return tinkpb.KeyData_SYMMETRIC
 }
 
-// // DeriveKey derives a new key from serializedKeyFormat and pseudorandomness.
-func (km *TPMHMACKeyManager) DeriveKey(serializedKeyFormat []byte, pseudorandomness io.Reader) (proto.Message, error) {
-	if len(serializedKeyFormat) == 0 {
-		return nil, errInvalidHMACKeyFormat
-	}
-
-	keyFormat := new(tinktpmprotopb.HMACKeyFormat)
-	if err := proto.Unmarshal(serializedKeyFormat, keyFormat); err != nil {
-		return nil, errInvalidHMACKeyFormat
-	}
-	if err := km.validateKeyFormat(keyFormat); err != nil {
-		return nil, fmt.Errorf("hmac_key_manager: invalid key format: %s", err)
-	}
-
-	if err := keyset.ValidateKeyVersion(keyFormat.GetVersion(), hmacKeyVersion); err != nil {
-		return nil, fmt.Errorf("hmac_key_manager: invalid key version: %s", err)
-	}
-
-	return km.NewKey(serializedKeyFormat)
-}
-
 // validateKey validates the given HMACKey. It only validates the version of the
 // key because other parameters will be validated in primitive construction.
-func (km *TPMHMACKeyManager) validateKey(key *tinktpmprotopb.HMACKey) error {
-	err := keyset.ValidateKeyVersion(key.KeyFormat.Version, hmacKeyVersion)
+func (km *TPMHMACKeyManager) validateKey(key *tinktpmprotopb.HMACTpmKey) error {
+	err := keyset.ValidateKeyVersion(key.Version, HMACKeyVersion)
 	if err != nil {
-		return fmt.Errorf("hmac_key_manager: invalid version: %s", err)
+		return err
 	}
 	hash := tinktpmprotopb.HashType_name[int32(key.KeyFormat.GetParams().GetHash())]
 	return subtle.ValidateHMACParams(hash, key.KeyFormat.KeySize, key.KeyFormat.GetParams().GetTagSize())
 }
 
 // validateKeyFormat validates the given HMACKeyFormat
-func (km *TPMHMACKeyManager) validateKeyFormat(format *tinktpmprotopb.HMACKeyFormat) error {
+func (km *TPMHMACKeyManager) validateKeyFormat(format *tinktpmprotopb.HMACTpmKeyFormat) error {
 	hash := tinktpmprotopb.HashType_name[int32(format.GetParams().GetHash())]
 	return subtle.ValidateHMACParams(hash, format.KeySize, format.GetParams().GetTagSize())
 }

@@ -8,13 +8,15 @@ import (
 	"net"
 	"os"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/google/go-tpm-tools/simulator"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
-	tinktpm "github.com/salrashid123/tink-go-tpm/v2"
 	tinkcommon "github.com/salrashid123/tink-go-tpm/v2/common"
+	tpmmac "github.com/salrashid123/tink-go-tpm/v2/mac"
 	"github.com/tink-crypto/tink-go/v2/core/registry"
 	"github.com/tink-crypto/tink-go/v2/insecurecleartextkeyset"
 	"github.com/tink-crypto/tink-go/v2/mac"
@@ -22,15 +24,10 @@ import (
 	"github.com/tink-crypto/tink-go/v2/keyset"
 )
 
-const (
-	emptyPassword   = ""
-	defaultPassword = ""
-)
-
 var (
-	tpmPath   = flag.String("tpm-path", "/dev/tpmrm0", "Path to the TPM device (character device or a Unix socket).")
+	tpmPath   = flag.String("tpm-path", "127.0.0.1:2321", "Path to the TPM device (character device or a Unix socket).")
 	plaintext = flag.String("plaintext", "foo", "plaintext to mac")
-	pcr       = flag.Uint("pcr", 23, "pcr to use")
+	pcrList   = flag.String("pcrList", "", "SHA256 PCR Values to seal against 16,23")
 	macFile   = flag.String("macFile", "mac.dat", "File to write the mac to")
 	keySet    = flag.String("keySet", "keyset.json", "File to write the keyset to")
 )
@@ -62,12 +59,21 @@ func run() int {
 	}()
 
 	rwr := transport.FromReadWriter(rwc)
+	var pcrs []uint
+	pcrsStr := strings.Split(*pcrList, ",")
+	for _, v := range pcrsStr {
+		uv, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			log.Fatalf("can't open TPM %q: %v", *tpmPath, err)
+		}
+		pcrs = append(pcrs, uint(uv))
+	}
 
 	sel := tpm2.TPMLPCRSelection{
 		PCRSelections: []tpm2.TPMSPCRSelection{
 			{
 				Hash:      tpm2.TPMAlgSHA256,
-				PCRSelect: tpm2.PCClientCompatible.PCRs(uint(*pcr)),
+				PCRSelect: tpm2.PCClientCompatible.PCRs(pcrs...),
 			},
 		},
 	}
@@ -97,13 +103,13 @@ func run() int {
 		return 1
 	}
 
-	se, err := tinkcommon.NewPCRSession(rwr, nil, pgd.PolicyDigest.Buffer, nil, sel.PCRSelections)
+	se, err := tinkcommon.NewPCRSession(rwr, nil, nil, pgd.PolicyDigest.Buffer, sel.PCRSelections, nil)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	hmacKeyManager := tinktpm.NewTPMHMACKeyManager(rwc, se)
+	hmacKeyManager := tpmmac.NewTPMHMACKeyManager(rwc, se)
 
 	err = registry.RegisterKeyManager(hmacKeyManager)
 	if err != nil {

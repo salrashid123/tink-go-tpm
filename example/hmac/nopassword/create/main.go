@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"io"
 	"log"
@@ -14,8 +15,8 @@ import (
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
-	tinktpm "github.com/salrashid123/tink-go-tpm/v2"
 	tinkcommon "github.com/salrashid123/tink-go-tpm/v2/common"
+	tpmmac "github.com/salrashid123/tink-go-tpm/v2/mac"
 	"github.com/tink-crypto/tink-go/v2/core/registry"
 	"github.com/tink-crypto/tink-go/v2/insecurecleartextkeyset"
 	"github.com/tink-crypto/tink-go/v2/mac"
@@ -26,7 +27,7 @@ import (
 const ()
 
 var (
-	tpmPath   = flag.String("tpm-path", "/dev/tpmrm0", "Path to the TPM device (character device or a Unix socket).")
+	tpmPath   = flag.String("tpm-path", "127.0.0.1:2321", "Path to the TPM device (character device or a Unix socket).")
 	plaintext = flag.String("plaintext", "foo", "plaintext to mac")
 
 	macFile = flag.String("macFile", "mac.dat", "File to write the mac to")
@@ -86,22 +87,22 @@ func run() int {
 		return 1
 	}
 
-	se, err := tinkcommon.NewPasswordSession(rwr, nil, pgd.PolicyDigest.Buffer, nil)
+	se, err := tinkcommon.NewPasswordSession(rwr, nil, nil, pgd.PolicyDigest.Buffer)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	hmacKeyManager := tinktpm.NewTPMHMACKeyManager(rwc, se)
+	hmacKeyManager := tpmmac.NewTPMHMACKeyManager(rwc, se)
 	err = registry.RegisterKeyManager(hmacKeyManager)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	kh1, err := keyset.NewHandle(tinktpm.HMACSHA256Tag256KeyTPMTemplate())
-	//kh1, err := keyset.NewHandle(tinktpm.HMACSHA256Tag256KeyTPMNoPrefixTemplate())
-	//kh1, err := keyset.NewHandle(tinktpm.HMACSHA512Tag256KeyTPMTemplate())
+	kh1, err := keyset.NewHandle(tpmmac.HMACSHA256Tag256KeyTPMTemplate())
+	//kh1, err := keyset.NewHandle(tpmmac.HMACSHA256Tag256KeyTPMNoPrefixTemplate())
+	//kh1, err := keyset.NewHandle(tpmmac.HMACSHA512Tag256KeyTPMTemplate())
 	if err != nil {
 		log.Println(err)
 		return 1
@@ -134,6 +135,14 @@ func run() int {
 		log.Println(err)
 		return 1
 	}
+
+	var prettyJSON bytes.Buffer
+	error := json.Indent(&prettyJSON, buf.Bytes(), "", "\t")
+	if error != nil {
+		log.Fatalf("JSON parse error: %v ", error)
+
+	}
+	log.Printf("Tink Keyset: \n%s\n", prettyJSON.String())
 
 	err = os.WriteFile(*keySet, buf.Bytes(), 0644)
 	if err != nil {

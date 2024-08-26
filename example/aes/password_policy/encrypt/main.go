@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"flag"
 	"io"
 	"log"
@@ -13,11 +14,11 @@ import (
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
-	tinktpm "github.com/salrashid123/tink-go-tpm/v2"
+	tpmaead "github.com/salrashid123/tink-go-tpm/v2/aead"
 	tinkcommon "github.com/salrashid123/tink-go-tpm/v2/common"
+	"github.com/tink-crypto/tink-go/v2/aead"
 	"github.com/tink-crypto/tink-go/v2/core/registry"
 	"github.com/tink-crypto/tink-go/v2/insecurecleartextkeyset"
-	"github.com/tink-crypto/tink-go/v2/mac"
 
 	"github.com/tink-crypto/tink-go/v2/keyset"
 )
@@ -25,11 +26,12 @@ import (
 const ()
 
 var (
-	tpmPath   = flag.String("tpm-path", "/dev/tpmrm0", "Path to the TPM device (character device or a Unix socket).")
-	plaintext = flag.String("plaintext", "foo", "plaintext to mac")
-
-	macFile = flag.String("macFile", "mac.dat", "File to write the mac to")
-	keySet  = flag.String("keySet", "keyset.json", "File to write the keyset to")
+	tpmPath       = flag.String("tpm-path", "127.0.0.1:2321", "Path to the TPM device (character device or a Unix socket).")
+	plaintext     = flag.String("plaintext", "foo", "plaintext to mac")
+	password      = flag.String("password", "testpswd", "password value")
+	ownerpassword = flag.String("ownerpassword", "", "TPMOwner password")
+	encryptedFile = flag.String("encryptedFile", "encrypted.dat", "File to write the encrypted data to")
+	keySet        = flag.String("keySet", "keyset.json", "File to write the keyset to")
 )
 
 var TPMDEVICES = []string{"/dev/tpm0", "/dev/tpmrm0"}
@@ -45,6 +47,7 @@ func OpenTPM(path string) (io.ReadWriteCloser, error) {
 }
 
 func run() int {
+
 	flag.Parse()
 
 	rwc, err := OpenTPM(*tpmPath)
@@ -84,52 +87,60 @@ func run() int {
 		return 1
 	}
 
-	se, err := tinkcommon.NewPasswordSession(rwr, nil, pgd.PolicyDigest.Buffer, nil)
+	pswd := []byte(*password)
+
+	se, err := tinkcommon.NewPasswordSession(rwr, pswd, []byte(*ownerpassword), pgd.PolicyDigest.Buffer)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	hmacKeyManager := tinktpm.NewTPMHMACKeyManager(rwc, se)
-
-	err = registry.RegisterKeyManager(hmacKeyManager)
+	aesKeyManager := tpmaead.NewTpmAesHmacAeadKeyManager(rwc, se)
+	err = registry.RegisterKeyManager(aesKeyManager)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	mf, err := os.ReadFile(*macFile)
+	kh1, err := keyset.NewHandle(tpmaead.TpmAes128CtrHmacSha256Template())
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	ksf, err := os.ReadFile(*keySet)
+	a, err := aead.New(kh1)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	ksr := keyset.NewJSONReader(bytes.NewBuffer(ksf))
+	e, err := a.Encrypt([]byte(*plaintext), nil)
+	if err != nil {
+		log.Println(err)
+		return 1
+	}
+	log.Printf("    Encrypted %s\n", base64.StdEncoding.EncodeToString(e))
 
-	kh, err := insecurecleartextkeyset.Read(ksr)
+	buf := new(bytes.Buffer)
+	w := keyset.NewJSONWriter(buf)
+
+	err = insecurecleartextkeyset.Write(kh1, w)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	av, err := mac.New(kh)
+	err = os.WriteFile(*encryptedFile, e, 0644)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	err = av.VerifyMAC(mf, []byte(*plaintext))
+	err = os.WriteFile(*keySet, buf.Bytes(), 0644)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
-	log.Println("Verified")
 
 	return 0
 }

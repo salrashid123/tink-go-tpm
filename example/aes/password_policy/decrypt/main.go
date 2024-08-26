@@ -13,11 +13,12 @@ import (
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
+	tpmaead "github.com/salrashid123/tink-go-tpm/v2/aead"
 	tinkcommon "github.com/salrashid123/tink-go-tpm/v2/common"
-	tpmmac "github.com/salrashid123/tink-go-tpm/v2/mac"
+	"github.com/tink-crypto/tink-go/v2/aead"
+
 	"github.com/tink-crypto/tink-go/v2/core/registry"
 	"github.com/tink-crypto/tink-go/v2/insecurecleartextkeyset"
-	"github.com/tink-crypto/tink-go/v2/mac"
 
 	"github.com/tink-crypto/tink-go/v2/keyset"
 )
@@ -25,11 +26,11 @@ import (
 const ()
 
 var (
-	tpmPath   = flag.String("tpm-path", "127.0.0.1:2321", "Path to the TPM device (character device or a Unix socket).")
-	plaintext = flag.String("plaintext", "foo", "plaintext to mac")
-
-	macFile = flag.String("macFile", "mac.dat", "File to write the mac to")
-	keySet  = flag.String("keySet", "keyset.json", "File to write the keyset to")
+	tpmPath       = flag.String("tpm-path", "127.0.0.1:2321", "Path to the TPM device (character device or a Unix socket).")
+	encryptedFile = flag.String("encryptedFile", "encrypted.dat", "File to read the encrypted data from")
+	password      = flag.String("password", "testpswd", "password value")
+	ownerpassword = flag.String("ownerpassword", "", "TPMOwner password")
+	keySet        = flag.String("keySet", "keyset.json", "File to read the keyset from")
 )
 
 var TPMDEVICES = []string{"/dev/tpm0", "/dev/tpmrm0"}
@@ -84,21 +85,23 @@ func run() int {
 		return 1
 	}
 
-	se, err := tinkcommon.NewPasswordSession(rwr, nil, nil, pgd.PolicyDigest.Buffer)
+	pswd := []byte(*password)
+
+	se, err := tinkcommon.NewPasswordSession(rwr, pswd, []byte(*ownerpassword), pgd.PolicyDigest.Buffer)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	hmacKeyManager := tpmmac.NewTPMHMACKeyManager(rwc, se)
+	aesKeyManager := tpmaead.NewTpmAesHmacAeadKeyManager(rwc, se)
 
-	err = registry.RegisterKeyManager(hmacKeyManager)
+	err = registry.RegisterKeyManager(aesKeyManager)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	mf, err := os.ReadFile(*macFile)
+	mf, err := os.ReadFile(*encryptedFile)
 	if err != nil {
 		log.Println(err)
 		return 1
@@ -118,19 +121,18 @@ func run() int {
 		return 1
 	}
 
-	av, err := mac.New(kh)
+	av, err := aead.New(kh)
+	if err != nil {
+		log.Println(err)
+		return 1
+	}
+	d, err := av.Decrypt(mf, nil)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	err = av.VerifyMAC(mf, []byte(*plaintext))
-	if err != nil {
-		log.Println(err)
-		return 1
-	}
-
-	log.Println("Verified")
+	log.Printf("decrypted %s\n", string(d))
 	return 0
 }
 

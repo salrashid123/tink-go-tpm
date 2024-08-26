@@ -2,22 +2,25 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"flag"
 	"io"
 	"log"
 	"net"
 	"os"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/google/go-tpm-tools/simulator"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
 	"github.com/google/go-tpm/tpmutil"
+	tpmaead "github.com/salrashid123/tink-go-tpm/v2/aead"
 	tinkcommon "github.com/salrashid123/tink-go-tpm/v2/common"
-	tpmmac "github.com/salrashid123/tink-go-tpm/v2/mac"
+	"github.com/tink-crypto/tink-go/v2/aead"
 	"github.com/tink-crypto/tink-go/v2/core/registry"
 	"github.com/tink-crypto/tink-go/v2/insecurecleartextkeyset"
-	"github.com/tink-crypto/tink-go/v2/mac"
 
 	"github.com/tink-crypto/tink-go/v2/keyset"
 )
@@ -28,8 +31,9 @@ var (
 	tpmPath   = flag.String("tpm-path", "127.0.0.1:2321", "Path to the TPM device (character device or a Unix socket).")
 	plaintext = flag.String("plaintext", "foo", "plaintext to mac")
 
-	macFile = flag.String("macFile", "mac.dat", "File to write the mac to")
-	keySet  = flag.String("keySet", "keyset.json", "File to write the keyset to")
+	pcrList       = flag.String("pcrList", "", "SHA256 PCR Values to seal against 16,23")
+	encryptedFile = flag.String("encryptedFile", "encrypted.dat", "File to write the encrypted data to")
+	keySet        = flag.String("keySet", "keyset.json", "File to write the keyset to")
 )
 
 var TPMDEVICES = []string{"/dev/tpm0", "/dev/tpmrm0"}
@@ -45,6 +49,7 @@ func OpenTPM(path string) (io.ReadWriteCloser, error) {
 }
 
 func run() int {
+
 	flag.Parse()
 
 	rwc, err := OpenTPM(*tpmPath)
@@ -59,6 +64,25 @@ func run() int {
 
 	rwr := transport.FromReadWriter(rwc)
 
+	var pcrs []uint
+	pcrsStr := strings.Split(*pcrList, ",")
+	for _, v := range pcrsStr {
+		uv, err := strconv.ParseUint(v, 10, 32)
+		if err != nil {
+			log.Fatalf("can't open TPM %q: %v", *tpmPath, err)
+		}
+		pcrs = append(pcrs, uint(uv))
+	}
+
+	sel := tpm2.TPMLPCRSelection{
+		PCRSelections: []tpm2.TPMSPCRSelection{
+			{
+				Hash:      tpm2.TPMAlgSHA256,
+				PCRSelect: tpm2.PCClientCompatible.PCRs(pcrs...),
+			},
+		},
+	}
+
 	sess, cleanup1, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, tpm2.Trial())
 	if err != nil {
 		log.Println(err)
@@ -67,8 +91,9 @@ func run() int {
 
 	defer cleanup1()
 
-	pav := tpm2.PolicyAuthValue{
+	pav := tpm2.PolicyPCR{
 		PolicySession: sess.Handle(),
+		Pcrs:          sel,
 	}
 	_, err = pav.Execute(rwr)
 	if err != nil {
@@ -84,53 +109,59 @@ func run() int {
 		return 1
 	}
 
-	se, err := tinkcommon.NewPasswordSession(rwr, nil, nil, pgd.PolicyDigest.Buffer)
+	se, err := tinkcommon.NewPCRSession(rwr, nil, nil, pgd.PolicyDigest.Buffer, sel.PCRSelections, nil)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	hmacKeyManager := tpmmac.NewTPMHMACKeyManager(rwc, se)
-
-	err = registry.RegisterKeyManager(hmacKeyManager)
+	aesKeyManager := tpmaead.NewTpmAesHmacAeadKeyManager(rwc, se)
+	err = registry.RegisterKeyManager(aesKeyManager)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	mf, err := os.ReadFile(*macFile)
+	kh1, err := keyset.NewHandle(tpmaead.TpmAes128CtrHmacSha256Template())
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	ksf, err := os.ReadFile(*keySet)
+	a, err := aead.New(kh1)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	ksr := keyset.NewJSONReader(bytes.NewBuffer(ksf))
+	e, err := a.Encrypt([]byte(*plaintext), nil)
+	if err != nil {
+		log.Println(err)
+		return 1
+	}
+	log.Printf("    Encrypted %s\n", base64.StdEncoding.EncodeToString(e))
 
-	kh, err := insecurecleartextkeyset.Read(ksr)
+	buf := new(bytes.Buffer)
+	w := keyset.NewJSONWriter(buf)
+
+	err = insecurecleartextkeyset.Write(kh1, w)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	av, err := mac.New(kh)
+	err = os.WriteFile(*encryptedFile, e, 0644)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	err = av.VerifyMAC(mf, []byte(*plaintext))
+	err = os.WriteFile(*keySet, buf.Bytes(), 0644)
 	if err != nil {
 		log.Println(err)
 		return 1
 	}
 
-	log.Println("Verified")
 	return 0
 }
 

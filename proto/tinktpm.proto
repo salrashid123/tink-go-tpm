@@ -4,6 +4,10 @@ package proto;
 
 option go_package = "github.com/salrashid123/tink-go-tpm/v2/proto";
 
+// /usr/local/bin/protoc -I ./ --include_imports \
+//    --experimental_allow_proto3_optional --include_source_info \
+//    --descriptor_set_out=proto/tinktpm.proto.pb --go_out=paths=source_relative:. proto/tinktpm.proto
+
 message TPMKey {
   uint32 version = 1;  
   KeyType keyType = 2;
@@ -12,37 +16,62 @@ message TPMKey {
     HMAC = 1;
   }
   oneof Key {
-    HMACKey hmacKey = 3;
+    HMACTpmKey hmacTpmKey = 3;
+    AesCtrHmacAeadTpmKey aesCtrHmacAEADTpmKey = 4;
   }
 }
 
 
-// key_type: type.googleapis.com/google.crypto.tink.TPMHmacKey
-message HMACKey {
-  bytes name = 1;
-  bytes public = 2;
-  bytes private = 3;  
+// key_type: "type.googleapis.com/github.salrashid123.tink-go-tpm.HmacTpmKey"
+message HMACTpmKey {
+  uint32 version = 1;    
+  bytes name = 2;
+  bytes keyfile = 3; 
   bytes policy_digest = 4;  
-  HMACKeyFormat key_format = 5;
+  HMACTpmKeyFormat key_format = 5;
 }
 
 message HMACParams {
-  HashType hash = 1;  // HashType is an enum.
+  HashType hash = 1;  
   uint32 tag_size = 2;
 }
 
 enum HashType {
   UNKNOWN_HASH = 0;
-  SHA1 = 1;  // Using SHA1 for digital signature is deprecated but HMAC-SHA1 is
-             // fine.
+  SHA1 = 1;  // https://github.com/tpm2-software/tpm2-tools/blob/master/man/common/alg.md#hashing-algorithms
   SHA384 = 2;
   SHA256 = 3;
   SHA512 = 4;
   SHA224 = 5;
 }
 
-message HMACKeyFormat {
+message HMACTpmKeyFormat {
   HMACParams params = 1;
   uint32 key_size = 2;
-  uint32 version = 3;
+}
+
+message AesCtrTpmKeyFormat {
+  uint32 iv_size = 1;
+  uint32 key_size = 2;  
+}
+
+message AesCtrTpmKey {
+  uint32 version = 1;  
+  AesCtrTpmKeyFormat key_format = 2;
+  bytes keyfile = 3;
+  bytes policy_digest = 4;    
+}
+
+message AesCtrHmacAeadTpmKeyFormat {
+  AesCtrTpmKeyFormat aes_format = 1;
+  HMACTpmKeyFormat hmac_format = 2;
+}
+
+// key_type:  "type.googleapis.com/github.salrashid123.tink-go-tpm.AesCtrHmacAeadTpmKey"
+message AesCtrHmacAeadTpmKey {
+  uint32 version = 1; 
+  bytes name = 3;
+  AesCtrHmacAeadTpmKeyFormat key_format = 2;  
+  AesCtrTpmKey aes_ctr_tpmkey = 4;   
+  HMACTpmKey hmac_tpmkey = 5; 
 }
