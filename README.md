@@ -154,7 +154,6 @@ $ go run hmac/nopassword/verify/main.go \
 
 ### Signature: RSA-SSA-PKCS1
 
-
 Internally, this generates an RSA inside the tpm and uses the tpm itself to create the signature.
 
 The public key is also written to a tink keyset and it can be used without a TPM to verify
@@ -484,6 +483,43 @@ AEAD:
 	]
 }
 ```
+
+Signing
+
+```json
+{
+	"primaryKeyId": 623370012,
+	"key": [
+		{
+			"keyData": {
+				"typeUrl": "type.googleapis.com/github.salrashid123.tink-go-tpm.RsaSsaPkcs1PublicTpmKey",
+				"value": "EgIIAxqA...",
+				"keyMaterialType": "ASYMMETRIC_PUBLIC"
+			},
+			"status": "ENABLED",
+			"keyId": 623370012,
+			"outputPrefixType": "TINK"
+		}
+	]
+}
+
+{
+	"primaryKeyId": 623370012,
+	"key": [
+		{
+			"keyData": {
+				"typeUrl": "type.googleapis.com/github.salrashid123.tink-go-tpm.RsaSsaPkcs1PrivateTpmKey",
+				"value": "EAIy1ggSjA...",
+				"keyMaterialType": "ASYMMETRIC_PRIVATE"
+			},
+			"status": "ENABLED",
+			"keyId": 623370012,
+			"outputPrefixType": "TINK"
+		}
+	]
+}
+```
+
 
 Where the "Value" field is the proto keys shown in `proto/tinktpm.proto`
 
