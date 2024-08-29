@@ -75,3 +75,40 @@ message AesCtrHmacAeadTpmKey {
   AesCtrTpmKey aes_ctr_tpmkey = 4;   
   HMACTpmKey hmac_tpmkey = 5; 
 }
+
+
+
+
+
+message RsaSsaPkcs1Params {
+  HashType hash_type = 1;
+}
+
+// key_type: type.googleapis.com/github.salrashid123.tink-go-tpm.RsaSsaPkcs1PublicTpmKey
+message RsaSsaPkcs1PublicTpmKey {
+  uint32 version = 1;
+  RsaSsaPkcs1Params params = 2;
+  bytes n = 3;
+  bytes e = 4;
+}
+
+// key_type: type.googleapis.com/github.salrashid123.tink-go-tpm.RsaSsaPkcs1PrivateTpmKey
+message RsaSsaPkcs1PrivateTpmKey {
+  uint32 version = 1;
+  RsaSsaPkcs1PublicTpmKey public_key = 2;
+  //bytes d = 3;
+  //bytes p = 4;
+  //bytes q = 5;
+  //bytes dp = 6;
+  //bytes dq = 7;
+  //bytes crt = 8;
+
+  bytes keyfile = 3;
+  bytes policy_digest = 4;   
+}
+
+message RsaSsaPkcs1KeyTpmFormat {
+  RsaSsaPkcs1Params params = 1;
+  uint32 modulus_size_in_bits = 2;
+  bytes public_exponent = 3;
+}

@@ -7,7 +7,8 @@ Currently, while TINK itself supports a variety of [key types](https://developer
 
 * **AEAD**: `AES-CTR-HMAC`
 * **MAC**: `HMAC-SHA2256`
-  
+* **Signature**: `RSA-SSA-PKCS1`
+
 >> NOTE: this repo is NOT supported by google
 
 see FR: [issue #389](https://github.com/google/tink/issues/389)
@@ -149,6 +150,87 @@ $ go run hmac/nopassword/verify/main.go \
 ```  
 
 ---
+
+
+### Signature: RSA-SSA-PKCS1
+
+
+Internally, this generates an RSA inside the tpm and uses the tpm itself to create the signature.
+
+The public key is also written to a tink keyset and it can be used without a TPM to verify
+
+```golang
+import (
+	"github.com/google/go-tpm/tpm2"
+	tpmsign "github.com/salrashid123/tink-go-tpm/v2/signature"
+	tinkcommon "github.com/salrashid123/tink-go-tpm/v2/common"
+	"github.com/tink-crypto/tink-go/v2/core/registry"
+
+	"github.com/tink-crypto/tink-go/v2/keyset"
+)
+
+// create a policy session to define any constraints (eg, password or pcr policy), the folloing example doesn't use any
+	sess, cleanup1, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, tpm2.Trial())
+	defer cleanup1()
+
+	pav := tpm2.PolicyAuthValue{
+		PolicySession: sess.Handle(),
+	}
+	_, err = pav.Execute(rwr)
+
+// calculate the digest for this policy
+	pgd, err := tpm2.PolicyGetDigest{
+		PolicySession: sess.Handle(),
+	}.Execute(rwr)
+
+// configure the session, in this case its a policysession is password with nil value as the password (i.,e no password):
+	se, err := tinkcommon.NewPasswordSession(rwr, nil, pgd.PolicyDigest.Buffer)
+
+// bind the session to the keymanager
+	rsaKeyManager := tpmsign.NewRSASSAPKCS1SignerTpmKeyManager(rwc, se)
+	err = registry.RegisterKeyManager(rsaKeyManager)
+
+// create a keyset from template
+	kh, err := keyset.NewHandle(tpmsign.RSA_SSA_PKCS1_2048_SHA256_F4_Key_Template()) // Other key templates can also be used.
+
+// get a signer
+	s, err := tpmsign.NewSigner(kh)
+
+// sign
+	sig, err := s.Sign(msg)
+
+	fmt.Printf("Signature: %s\n", base64.StdEncoding.EncodeToString(sig))
+
+
+// to verify, get the public key (you can write this safely to anywhere and you dont' need a tpm to verify)
+	pubkh, err := kh.Public()
+
+// acquire the verifier key manger
+	rsaVerifierKeyManager := tpmsign.NewRSASSAPKCS1VerifierTpmKeyManager(nil, nil)
+	err = registry.RegisterKeyManager(rsaVerifierKeyManager)
+
+// verify
+	v, err := tpmsign.NewVerifier(pubkh)
+	if err := v.Verify(sig, msg); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Verified")
+```
+
+See the `example/` folder.  If you would rather just test with a software TPM, see the section below.
+
+
+```bash
+# sign
+$ go run sign/rsa/nopassword/sign/main.go \
+   --tpm-path="127.0.0.1:2321" --publicKeySet=/tmp/public.json --privateKeySet=/tmp/private.json \
+   --plaintext=foo  --signatureFile=/tmp/signature.dat --dataFile=/tmp/data.txt
+
+# verify
+$ go run sign/rsa/nopassword/verify/main.go \
+    --publicKeySet=/tmp/public.json \
+    --signatureFile=/tmp/signature.dat --dataFile=/tmp/data.txt
+```  
 
 ### With Policy
 
@@ -314,12 +396,15 @@ While the key type used here is custom:
 
 * `"type.googleapis.com/github.salrashid123.tink-go-tpm.HmacTpmKey"`
 * `"type.googleapis.com/github.salrashid123.tink-go-tpm.AesCtrHmacAeadTpmKey"`
+* `"type.googleapis.com/github.salrashid123.tink-go-tpm.RsaSsaPkcs1PublicTpmKey"`
+* `"type.googleapis.com/github.salrashid123.tink-go-tpm.RsaSsaPkcs1PrivateTpmKey"`
 
 you can still  use `tinkkey` for listing specifications (you can't use it to generate a new key since tinkey doens't know about this type...)
 
 ```bash
-$ tinkey list-keyset --in keyset.json 
 
+# hmac
+$ tinkey list-keyset --in keyset.json 
 primary_key_id: 3163174926
 key_info {
   type_url: "type.googleapis.com/github.salrashid123.tink-go-tpm.HmacTpmKey"
@@ -328,6 +413,7 @@ key_info {
   output_prefix_type: TINK
 }
 
+## ead
 $ tinkey list-keyset --in keyset.json 
 primary_key_id: 1643958734
 key_info {
@@ -336,6 +422,27 @@ key_info {
   key_id: 1643958734
   output_prefix_type: TINK
 }
+
+
+### rsa
+$ tinkey list-keyset --in /tmp/private.json 
+primary_key_id: 623370012
+key_info {
+  type_url: "type.googleapis.com/github.salrashid123.tink-go-tpm.RsaSsaPkcs1PrivateTpmKey"
+  status: ENABLED
+  key_id: 623370012
+  output_prefix_type: TINK
+}
+
+$ tinkey list-keyset --in /tmp/public.json 
+primary_key_id: 623370012
+key_info {
+  type_url: "type.googleapis.com/github.salrashid123.tink-go-tpm.RsaSsaPkcs1PublicTpmKey"
+  status: ENABLED
+  key_id: 623370012
+  output_prefix_type: TINK
+}
+
 ```
 
 as JSON, they are:
@@ -433,4 +540,8 @@ go test -v ./aead -run ^TestAeadPCRFail$
 
 go test -v ./aead -run ^TestAeadOwnerPassword$
 go test -v ./aead -run ^TestAeadOwnerPasswordFail$
+
+
+go test -v ./signature -run ^TestSignVerify$
+go test -v ./signature -run ^TestSignVerifyFail$
 ```
