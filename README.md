@@ -541,6 +541,7 @@ go test -v ./aead -run ^TestAeadPCRFail$
 go test -v ./aead -run ^TestAeadOwnerPassword$
 go test -v ./aead -run ^TestAeadOwnerPasswordFail$
 
+### rsa tests
 
 go test -v ./signature -run ^TestSignVerify$
 go test -v ./signature -run ^TestSignVerifyFail$

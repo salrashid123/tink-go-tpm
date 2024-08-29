@@ -3,6 +3,7 @@ package signature
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 
@@ -49,10 +50,16 @@ func (km *tpmRSASSAPKCS1SignerKeyManager) Primitive(serializedKey []byte) (any, 
 	if false {
 		return nil, errInvalidRSASSAPKCS1SignKey
 	}
-	key := &tinktpmprotopb.RsaSsaPkcs1PrivateTpmKey{}
-	if err := proto.Unmarshal(serializedKey, key); err != nil {
+	tkey := &tinktpmprotopb.TPMKey{}
+	if err := proto.Unmarshal(serializedKey, tkey); err != nil {
 		return nil, err
 	}
+
+	if tkey.KeyType != tinktpmprotopb.TPMKey_ASYMMETRIC {
+		return nil, fmt.Errorf("invalid keytype: %v", tkey.KeyType)
+	}
+
+	key := tkey.GetRsassaPrivateKey()
 	if err := validateRSAPKCS1PrivateKey(key); err != nil {
 		return nil, err
 	}
@@ -222,10 +229,6 @@ func (km *tpmRSASSAPKCS1SignerKeyManager) NewKey(serializedKeyFormat []byte) (pr
 
 	// *****************
 
-	// rsaKey, err := rsa.GenerateKey(rand.Reader, int(keyFormat.GetModulusSizeInBits()))
-	// if err != nil {
-	// 	return nil, fmt.Errorf("generating RSA key: %s", err)
-	// }
 	pubKey := &tinktpmprotopb.RsaSsaPkcs1PublicTpmKey{
 		Version: rsaSSAPKCS1SignerKeyVersion,
 		Params: &tinktpmprotopb.RsaSsaPkcs1Params{
@@ -234,22 +237,19 @@ func (km *tpmRSASSAPKCS1SignerKeyManager) NewKey(serializedKeyFormat []byte) (pr
 		N: rsaPub.N.Bytes(),
 		E: big.NewInt(int64(rsaPub.E)).Bytes(),
 	}
-	return &tinktpmprotopb.RsaSsaPkcs1PrivateTpmKey{
-		Version:   rsaSSAPKCS1SignerKeyVersion,
-		PublicKey: pubKey,
-		Keyfile:   rsaKeybytes.Bytes(),
-		// D:         rsaKey.D.Bytes(),
-		// P:         rsaKey.Primes[0].Bytes(),
-		// Q:         rsaKey.Primes[1].Bytes(),
-		// Dp:        rsaKey.Precomputed.Dp.Bytes(),
-		// Dq:        rsaKey.Precomputed.Dq.Bytes(),
-		// In crypto/rsa `Qinv` is the "Chinese Remainder Theorem
-		// coefficient q^(-1) mod p". This corresponds with `Crt` in
-		// the Tink proto. This is unrelated to `CRTValues`, which
-		// contains values specifically for additional primes, which
-		// are not supported by Tink.
-		//Crt: rsaKey.Precomputed.Qinv.Bytes(),
+
+	return &tinktpmprotopb.TPMKey{
+		Version: common.TPMKeyVersion,
+		KeyType: tinktpmprotopb.TPMKey_ASYMMETRIC,
+		Key: &tinktpmprotopb.TPMKey_RsassaPrivateKey{
+			RsassaPrivateKey: &tinktpmprotopb.RsaSsaPkcs1PrivateTpmKey{
+				Version:   rsaSSAPKCS1SignerKeyVersion,
+				PublicKey: pubKey,
+				Keyfile:   rsaKeybytes.Bytes(),
+			},
+		},
 	}, nil
+
 }
 
 func (km *tpmRSASSAPKCS1SignerKeyManager) NewKeyData(serializedKeyFormat []byte) (*tinkpb.KeyData, error) {
@@ -270,10 +270,14 @@ func (km *tpmRSASSAPKCS1SignerKeyManager) NewKeyData(serializedKeyFormat []byte)
 
 // PublicKeyData extracts the public key data from the private key.
 func (km *tpmRSASSAPKCS1SignerKeyManager) PublicKeyData(serializedPrivKey []byte) (*tinkpb.KeyData, error) {
-	privKey := &tinktpmprotopb.RsaSsaPkcs1PrivateTpmKey{}
-	if err := proto.Unmarshal(serializedPrivKey, privKey); err != nil {
+
+	tkey := &tinktpmprotopb.TPMKey{}
+	if err := proto.Unmarshal(serializedPrivKey, tkey); err != nil {
 		return nil, err
 	}
+
+	privKey := tkey.GetRsassaPrivateKey()
+
 	if err := validateRSAPKCS1PrivateKey(privKey); err != nil {
 		return nil, err
 	}

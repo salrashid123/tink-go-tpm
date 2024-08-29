@@ -14,10 +14,13 @@ message TPMKey {
   enum KeyType {
     SYMMETRIC = 0;
     HMAC = 1;
+    ASYMMETRIC = 2;    
   }
   oneof Key {
     HMACTpmKey hmacTpmKey = 3;
     AesCtrHmacAeadTpmKey aesCtrHmacAEADTpmKey = 4;
+    RsaSsaPkcs1PublicTpmKey rsassaPublicKey = 5;
+    RsaSsaPkcs1PrivateTpmKey rsassaPrivateKey = 6;
   }
 }
 
@@ -77,9 +80,6 @@ message AesCtrHmacAeadTpmKey {
 }
 
 
-
-
-
 message RsaSsaPkcs1Params {
   HashType hash_type = 1;
 }
@@ -96,13 +96,6 @@ message RsaSsaPkcs1PublicTpmKey {
 message RsaSsaPkcs1PrivateTpmKey {
   uint32 version = 1;
   RsaSsaPkcs1PublicTpmKey public_key = 2;
-  //bytes d = 3;
-  //bytes p = 4;
-  //bytes q = 5;
-  //bytes dp = 6;
-  //bytes dq = 7;
-  //bytes crt = 8;
-
   bytes keyfile = 3;
   bytes policy_digest = 4;   
 }

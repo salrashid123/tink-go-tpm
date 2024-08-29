@@ -44,31 +44,12 @@ func newWrappedVerifier(ps *primitiveset.PrimitiveSet) (*wrappedVerifier, error)
 			}
 		}
 	}
-	// logger, err := createVerifierLogger(ps)
-	// if err != nil {
-	// 	return nil, err
-	// }
+
 	return &wrappedVerifier{
 		ps:     ps,
 		logger: nil,
 	}, nil
 }
-
-// func createVerifierLogger(ps *primitiveset.PrimitiveSet) (monitoring.Logger, error) {
-// 	// only keysets which contain annotations are monitored.
-// 	if len(ps.Annotations) == 0 {
-// 		return &monitoringutil.DoNothingLogger{}, nil
-// 	}
-// 	keysetInfo, err := monitoringutil.KeysetInfoFromPrimitiveSet(ps)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return internalregistry.GetMonitoringClient().NewLogger(&monitoring.Context{
-// 		KeysetInfo:  keysetInfo,
-// 		Primitive:   "public_key_verify",
-// 		APIFunction: "verify",
-// 	})
-// }
 
 var errInvalidSignature = errors.New("verifier_factory: invalid signature")
 
