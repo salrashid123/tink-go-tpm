@@ -44,7 +44,7 @@ func OpenTPM(path string) (io.ReadWriteCloser, error) {
 	}
 }
 
-func run() int {
+func main() {
 	flag.Parse()
 
 	rwc, err := OpenTPM(*tpmPath)
@@ -61,8 +61,7 @@ func run() int {
 
 	sess, cleanup1, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, tpm2.Trial())
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	defer cleanup1()
@@ -72,69 +71,54 @@ func run() int {
 	}
 	_, err = pav.Execute(rwr)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	pgd, err := tpm2.PolicyGetDigest{
 		PolicySession: sess.Handle(),
 	}.Execute(rwr)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	se, err := tinkcommon.NewPasswordSession(rwr, nil, nil, pgd.PolicyDigest.Buffer)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	hmacKeyManager := tpmmac.NewTPMHMACKeyManager(rwc, se)
 
 	err = registry.RegisterKeyManager(hmacKeyManager)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	mf, err := os.ReadFile(*macFile)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	ksf, err := os.ReadFile(*keySet)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	ksr := keyset.NewJSONReader(bytes.NewBuffer(ksf))
 
 	kh, err := insecurecleartextkeyset.Read(ksr)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	av, err := mac.New(kh)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	err = av.VerifyMAC(mf, []byte(*plaintext))
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	log.Println("Verified")
-	return 0
-}
-
-func main() {
-	flag.Parse()
-	os.Exit(run())
 }

@@ -45,7 +45,7 @@ func OpenTPM(path string) (io.ReadWriteCloser, error) {
 	}
 }
 
-func run() int {
+func main() {
 	flag.Parse()
 	//ctx := context.Background()
 
@@ -82,8 +82,7 @@ func run() int {
 
 	sess, cleanup1, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, tpm2.Trial())
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	defer cleanup1()
@@ -94,49 +93,41 @@ func run() int {
 	}
 	_, err = pav.Execute(rwr)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	pgd, err := tpm2.PolicyGetDigest{
 		PolicySession: sess.Handle(),
 	}.Execute(rwr)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	se, err := tinkcommon.NewPCRSession(rwr, nil, nil, pgd.PolicyDigest.Buffer, sel.PCRSelections, nil)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	hmacKeyManager := tpmmac.NewTPMHMACKeyManager(rwc, se)
 
 	err = registry.RegisterKeyManager(hmacKeyManager)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	kh1, err := keyset.NewHandle(tpmmac.HMACSHA256Tag256KeyTPMTemplate())
-
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	a, err := mac.New(kh1)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	tag, err := a.ComputeMAC([]byte(*plaintext))
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 	log.Printf("    MAC %s\n", base64.RawStdEncoding.EncodeToString(tag))
 
@@ -145,26 +136,15 @@ func run() int {
 
 	err = insecurecleartextkeyset.Write(kh1, w)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
-
 	err = os.WriteFile(*macFile, tag, 0644)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
-
 	err = os.WriteFile(*keySet, buf.Bytes(), 0644)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
-	return 0
-}
-
-func main() {
-	flag.Parse()
-	os.Exit(run())
 }

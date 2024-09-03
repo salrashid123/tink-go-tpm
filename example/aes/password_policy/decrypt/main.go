@@ -45,7 +45,7 @@ func OpenTPM(path string) (io.ReadWriteCloser, error) {
 	}
 }
 
-func run() int {
+func main() {
 	flag.Parse()
 
 	rwc, err := OpenTPM(*tpmPath)
@@ -62,8 +62,7 @@ func run() int {
 
 	sess, cleanup1, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, tpm2.Trial())
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	defer cleanup1()
@@ -73,70 +72,57 @@ func run() int {
 	}
 	_, err = pav.Execute(rwr)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	pgd, err := tpm2.PolicyGetDigest{
 		PolicySession: sess.Handle(),
 	}.Execute(rwr)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	pswd := []byte(*password)
 
 	se, err := tinkcommon.NewPasswordSession(rwr, pswd, []byte(*ownerpassword), pgd.PolicyDigest.Buffer)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	aesKeyManager := tpmaead.NewTpmAesHmacAeadKeyManager(rwc, se)
 
 	err = registry.RegisterKeyManager(aesKeyManager)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	mf, err := os.ReadFile(*encryptedFile)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	ksf, err := os.ReadFile(*keySet)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	ksr := keyset.NewJSONReader(bytes.NewBuffer(ksf))
 
 	kh, err := insecurecleartextkeyset.Read(ksr)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	av, err := aead.New(kh)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
+
 	d, err := av.Decrypt(mf, nil)
 	if err != nil {
-		log.Println(err)
-		return 1
+		log.Fatalln(err)
 	}
 
 	log.Printf("decrypted %s\n", string(d))
-	return 0
-}
 
-func main() {
-	flag.Parse()
-	os.Exit(run())
 }
