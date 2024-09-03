@@ -28,7 +28,7 @@ import (
 	"github.com/tink-crypto/tink-go/v2/keyset"
 )
 
-// create a policy session to define any constraints (eg, password or pcr policy), the folloing example doesn't use any
+// create a policy session to define any constraints (eg, password or pcr policy), the following example doesn't use any
 	sess, cleanup1, err := tpm2.PolicySession(rwr, tpm2.TPMAlgSHA256, 16, tpm2.Trial())
 	defer cleanup1()
 
@@ -153,6 +153,7 @@ $ go run hmac/nopassword/verify/main.go \
 
 
 ### Signature: RSA-SSA-PKCS1
+
 
 Internally, this generates an RSA inside the tpm and uses the tpm itself to create the signature.
 
@@ -520,7 +521,6 @@ Signing
 }
 ```
 
-
 Where the "Value" field is the proto keys shown in `proto/tinktpm.proto`
 
 #### Parent Key
@@ -552,33 +552,26 @@ Due to the limitation of the singleton keymanager auth call back configs, each t
 ## hmac tests
 go test -v ./mac -run ^TestMac$
 go test -v ./mac -run ^TestMacFail$
-
 go test -v ./mac -run ^TestMacPassword$
 go test -v ./mac -run ^TestMacPasswordFail$
-
 go test -v ./mac -run ^TestMacPCR$
 go test -v ./mac -run ^TestMacPCRFail$
-
 go test -v ./mac -run ^TestMacOwnerPassword$
 go test -v ./mac -run ^TestMacOwnerPasswordFail$
 
-
 ### aead tests
-
 go test -v ./aead -run ^TestAead$
 go test -v ./aead -run ^TestAeadFail$
-
 go test -v ./aead -run ^TestAeadPassword$
 go test -v ./aead -run ^TestAeadPasswordFail$
-
 go test -v ./aead -run ^TestAeadPCR$
 go test -v ./aead -run ^TestAeadPCRFail$
-
 go test -v ./aead -run ^TestAeadOwnerPassword$
 go test -v ./aead -run ^TestAeadOwnerPasswordFail$
 
 ### rsa tests
-
+go test -v ./signature -run ^TestSign$
+go test -v ./signature -run ^TestSignFail$
 go test -v ./signature -run ^TestSignVerify$
 go test -v ./signature -run ^TestSignVerifyFail$
 ```

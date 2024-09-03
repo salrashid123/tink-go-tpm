@@ -11,6 +11,7 @@ import (
 	keyfile "github.com/foxboron/go-tpm-keyfiles"
 	"github.com/google/go-tpm/tpm2"
 	"github.com/google/go-tpm/tpm2/transport"
+	"github.com/tink-crypto/tink-go/aead/subtle"
 
 	tinkcommon "github.com/salrashid123/tink-go-tpm/v2/common"
 	tinktpmprotopb "github.com/salrashid123/tink-go-tpm/v2/proto"
@@ -35,6 +36,8 @@ type TpmAesCtr struct {
 }
 
 var ()
+
+var _ subtle.INDCPACipher = (*TpmAesCtr)(nil)
 
 const maxDigestBuffer = 1024
 

@@ -7,7 +7,6 @@ import (
 	"github.com/tink-crypto/tink-go/v2/core/cryptofmt"
 	"github.com/tink-crypto/tink-go/v2/core/primitiveset"
 	"github.com/tink-crypto/tink-go/v2/keyset"
-	"github.com/tink-crypto/tink-go/v2/monitoring"
 
 	tinkpb "github.com/tink-crypto/tink-go/v2/proto/tink_go_proto"
 	"github.com/tink-crypto/tink-go/v2/tink"
@@ -25,8 +24,7 @@ func NewVerifier(handle *keyset.Handle) (tink.Verifier, error) {
 // verifierSet is a Verifier implementation that uses the
 // underlying primitive set for verifying.
 type wrappedVerifier struct {
-	ps     *primitiveset.PrimitiveSet
-	logger monitoring.Logger
+	ps *primitiveset.PrimitiveSet
 }
 
 // Asserts that verifierSet implements the Verifier interface.
@@ -46,8 +44,7 @@ func newWrappedVerifier(ps *primitiveset.PrimitiveSet) (*wrappedVerifier, error)
 	}
 
 	return &wrappedVerifier{
-		ps:     ps,
-		logger: nil,
+		ps: ps,
 	}, nil
 }
 

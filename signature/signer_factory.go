@@ -6,7 +6,6 @@ import (
 	"github.com/tink-crypto/tink-go/v2/core/primitiveset"
 
 	"github.com/tink-crypto/tink-go/v2/keyset"
-	"github.com/tink-crypto/tink-go/v2/monitoring"
 	tinkpb "github.com/tink-crypto/tink-go/v2/proto/tink_go_proto"
 	"github.com/tink-crypto/tink-go/v2/tink"
 )
@@ -22,8 +21,7 @@ func NewSigner(handle *keyset.Handle) (tink.Signer, error) {
 
 // wrappedSigner is an Signer implementation that uses the underlying primitive set for signing.
 type wrappedSigner struct {
-	ps     *primitiveset.PrimitiveSet
-	logger monitoring.Logger
+	ps *primitiveset.PrimitiveSet
 }
 
 // Asserts that wrappedSigner implements the Signer interface.
@@ -42,8 +40,7 @@ func newWrappedSigner(ps *primitiveset.PrimitiveSet) (*wrappedSigner, error) {
 		}
 	}
 	return &wrappedSigner{
-		ps:     ps,
-		logger: nil,
+		ps: ps,
 	}, nil
 }
 
@@ -67,7 +64,7 @@ func (s *wrappedSigner) Sign(data []byte) ([]byte, error) {
 
 	signature, err := signer.Sign(signedData)
 	if err != nil {
-		s.logger.LogFailure()
+		//s.logger.LogFailure()
 		return nil, err
 	}
 

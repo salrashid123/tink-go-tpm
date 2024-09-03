@@ -14,7 +14,7 @@ import (
 	tinkpb "github.com/tink-crypto/tink-go/v2/proto/tink_go_proto"
 )
 
-func TestSign(t *testing.T) {
+func TestSignVerify(t *testing.T) {
 	//tpmDevice, err := tinkcommon.OpenTPM("127.0.0.1:2321")  // rsa keys larger than 2048 work with this
 	//   but not the go-tpm-tools simulator below... i have to figure this out later
 	tpmDevice, err := simulator.Get()
@@ -47,6 +47,10 @@ func TestSign(t *testing.T) {
 	err = registry.RegisterKeyManager(rsaKeyManager)
 	require.NoError(t, err)
 
+	rsaVerifierKeyManager := NewRSASSAPKCS1VerifierTpmKeyManager(nil, nil)
+	err = registry.RegisterKeyManager(rsaVerifierKeyManager)
+	require.NoError(t, err)
+
 	tests := []struct {
 		name     string
 		template *tinkpb.KeyTemplate
@@ -67,13 +71,24 @@ func TestSign(t *testing.T) {
 			require.NoError(t, err)
 
 			msg := []byte([]byte(plaintext))
-			_, err = s.Sign(msg)
+			sig, err := s.Sign(msg)
 			require.NoError(t, err)
+
+			pubkh, err := kh1.Public()
+			require.NoError(t, err)
+
+			// verify
+			v, err := NewVerifier(pubkh)
+			require.NoError(t, err)
+
+			err = v.Verify(sig, msg)
+			require.NoError(t, err)
+
 		})
 	}
 }
 
-func TestSignFail(t *testing.T) {
+func TestSignVerifyFail(t *testing.T) {
 	//tpmDevice, err := tinkcommon.OpenTPM("127.0.0.1:2321")
 	tpmDevice, err := simulator.Get()
 	require.NoError(t, err)
@@ -105,6 +120,10 @@ func TestSignFail(t *testing.T) {
 	err = registry.RegisterKeyManager(rsaKeyManager)
 	require.NoError(t, err)
 
+	rsaVerifierKeyManager := NewRSASSAPKCS1VerifierTpmKeyManager(nil, nil)
+	err = registry.RegisterKeyManager(rsaVerifierKeyManager)
+	require.NoError(t, err)
+
 	tests := []struct {
 		name     string
 		template *tinkpb.KeyTemplate
@@ -121,22 +140,21 @@ func TestSignFail(t *testing.T) {
 			s, err := NewSigner(kh1)
 			require.NoError(t, err)
 
-			// abruptly change the owner auth
-			ownerPwd := "bar"
-			_, err = tpm2.HierarchyChangeAuth{
-				AuthHandle: tpm2.AuthHandle{
-					Handle: tpm2.TPMRHOwner,
-					Auth:   tpm2.PasswordAuth(nil),
-				},
-				NewAuth: tpm2.TPM2BAuth{
-					Buffer: []byte(ownerPwd),
-				},
-			}.Execute(rwr)
-			require.NoError(t, err)
-
 			msg := []byte([]byte(plaintext))
 			_, err = s.Sign(msg)
+			require.NoError(t, err)
+
+			pubkh, err := kh1.Public()
+			require.NoError(t, err)
+
+			// verify
+			v, err := NewVerifier(pubkh)
+			require.NoError(t, err)
+
+			badsig := []byte("bar")
+			err = v.Verify(badsig, msg)
 			require.Error(t, err)
+
 		})
 	}
 }

@@ -73,6 +73,12 @@ jobs:
       - name: Run TestAeadOwnerPasswordFail
         run: go test -v ./aead -run ^TestAeadOwnerPasswordFail$
 
+      - name: Run TestSign
+        run: go test -v ./signature -run ^TestSign$
+
+      - name: Run TestSignFail
+        run: go test -v ./signature -run ^TestSignFail
+
       - name: Run TestSignVerify
         run: go test -v ./signature -run ^TestSignVerify$
 
